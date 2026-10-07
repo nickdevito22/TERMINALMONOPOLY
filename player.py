@@ -168,16 +168,23 @@ def initialize(debug: bool = False, args: list = None) -> None:
         print(f"Your player id is: {player_id}.\nEnter to continue...")
         input()
 
-        ### THIS IS WHERE WE ARE STUCK
+        ### THIS IS WHERE WE ARE STUCK (FIXED)
         ss.print_w_dots("Attempting to connect to Banker's receiver...")
-        sleep(1)
-        try:
-            sockets[1].connect((ADDRESS, int(PORT)+1))
-        except Exception as e:
-            print(e)
-            with open ("error_log.txt", "a") as f:
-                f.write(f"Failed to connect to Banker's receiver. {e}\n")
+        connected = False
+        for attempt in range(5):
+            try:
+                sockets[1].connect((ADDRESS, int(PORT)+1))
+                connected = True
+                break
+            except Exception as e:
+                sleep(1)
+
+        if not connected:
+            with open("error_log.txt", "a") as f:
+                f.write(f"Failed to connect to Banker's receiver after multiple attempts.\n")
             ss.print_w_dots("Failed connecting. ")
+            sys.exit(1)
+        ### (FIXED)
 
 def handshake(sock: socket.socket, name: str) -> str:
     """
