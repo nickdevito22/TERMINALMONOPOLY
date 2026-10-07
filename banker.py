@@ -87,9 +87,12 @@ def start_server() -> socket.socket:
 
     Returns: Transmitter socket aka the Banker's sender socket.  
     """
+    ### FIXED
     global clients, port, server_socket
     # Create a socket object
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    ### FIXED
 
     if "-local" in sys.argv:
         ip_address = "localhost"
@@ -148,11 +151,14 @@ def start_receivers() -> None:
     threading.Thread(target=receiver_loop, args=(port,), name="ReceiverThread").start() # Start the receiver loop in a separate thread
     threading.Thread(target=receiver_loop, args=(port, True), daemon=True, name="OOFReceiverThread").start() # Start the OOF receiver loop in a separate thread
     add_to_output_area("Main", "Receivers started!", COLORS.GREEN)  
-    
+
+### FIXED
 def receiver_loop(port:int, is_oof_thread: bool = False) -> None:
     with socket.socket() as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         host = socket.gethostname()
         ip_address = socket.gethostbyname(host)
+### FIXED
         if "-local" in sys.argv:
             ip_address = "localhost"
             port = 33333
@@ -175,15 +181,27 @@ def receiver_loop(port:int, is_oof_thread: bool = False) -> None:
                     if not is_oof_thread:
                         add_to_output_area("Main", f"Player connected from: {address[0]}", COLORS.GREEN)
                     to_read.append(player) # add client to list of readable sockets
+
+                ### FIXED
                 else:
                     try:
                         data = net.receive_message(reader)
-                        handle_data(data, reader)
-                    except ConnectionResetError:
+                        if not data:  # Graceful client close
+                            if not is_oof_thread:
+                                add_to_output_area("Main", "Player disconnected.", COLORS.RED)
+                            to_read.remove(reader)
+                            reader.close()
+                        else:
+                            handle_data(data, reader)
+                    except (ConnectionResetError, BrokenPipeError, OSError):
                         if not is_oof_thread:
-                            add_to_output_area("Main", f"Player at {address[0]} disconnected.", COLORS.RED)
-                        to_read.remove(reader) # remove from monitoring
-
+                            add_to_output_area("Main", "Player connection dropped unexpectedly.", COLORS.RED)
+                        to_read.remove(reader)
+                        try:
+                            reader.close()
+                        except Exception:
+                            pass
+                ### FIXED
                         # TODO send a message to each player to query who is still connected, then properly remove
                         # the disconnected player from the game. Currently only removing the first player in clients list. 
                         # clients.pop(0)
@@ -191,6 +209,7 @@ def receiver_loop(port:int, is_oof_thread: bool = False) -> None:
                     # if not data: # No data indicates disconnect
                     #     add_to_output_area("Main", f"Player at {address[0]} disconnected.", s.COLORS.RED)
                     #     to_read.remove(reader) # remove from monitoring
+
                 if(len(to_read) == 1):
                     if not is_oof_thread:
                         if "-stayopen" not in sys.argv:
@@ -336,16 +355,22 @@ def handle_data(data: str, client: socket.socket) -> None:
     Returns:
         None
     """
+    ### FIXED
     current_client = None
     try:
         pid = int(data[0])
         current_client = clients[pid] # Assume the data is prefixed by the client number AKA player_id.
         data = data[1:]
     except:
-        current_client = get_client_by_socket(client) # This is a backup in case the client data is not prefixed by client.
+        current_client = get_client_by_socket(client) # Backup fallback
         add_to_output_area("Main", f"Failed to get client from data. Data was not prefixed by client: {data}", COLORS.RED)
 
+    if current_client is None:
+        add_to_output_area("Main", f"Could not identify client for message: \"{data}\"", COLORS.RED)
+        return
+
     add_to_output_area("Main", f"Received data from {current_client.name}: \"{data}\"")
+    ### FIXED
     
     if data == 'request_board': 
         net.send_message(client, mply.get_gameboard())
@@ -615,18 +640,18 @@ def monopoly_controller(unit_test) -> None:
     last_turn = 0
     while True:
         sleep(1)
+        ### FIXED
         if mply.turn != last_turn:
-            # if disconnect, move to next player
             try:
                 ss.set_cursor(0, 20)
                 last_turn = mply.turn
                 net.send_notif(clients[mply.turn].socket, mply.get_gameboard() + ss.set_cursor_str(0, 38) + "It's your turn. Type roll to roll the dice.", "MPLY:")
                 clients[mply.turn].can_roll = True
-                # ss.set_cursor(ss.MONOPOLY_OUTPUT_COORDINATES[0]+1, ss.MONOPOLY_OUTPUT_COORDINATES[1]+1)
                 add_to_output_area("Monopoly", f"Player turn: {mply.turn}. Sent gameboard to {clients[mply.turn].name}.")
-            except:
-                add_to_output_area("Monopoly", f"Player turn: {mply.turn}. Disconnected")
+            except Exception:
+                add_to_output_area("Monopoly", f"Player turn: {mply.turn} disconnected. Skipping turn.", COLORS.RED)
                 mply.end_turn()
+        ### FIXED
 def monopoly_game(client: Client = None, cmd: str = None) -> None:
     """
     Description:
